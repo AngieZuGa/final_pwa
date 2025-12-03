@@ -1,100 +1,89 @@
-// Service Worker
+//  SERVICE WORKER 
 
-// Asignar un nombre y versión a la caché
-const CACHE_NAME = 'Mercado pago';
+// Nombre correcto de caché
+const CACHE_NAME = 'mercadopago-cache-v1';
 
-// Archivos que se van a cachear
+// Archivos a cachear
 const urlsToCache = [
   './',
+  './index.html',
   './style.css',
   './app.js',
   './assets/images/store.png',
-  './index.html',
   './manifest.json'
 ];
 
-// Evento de instalación del Service Worker
+// =========================
+//  INSTALL (pre-cache)
+// =========================
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        return cache.addAll(urlsToCache)
-          .then(() => {
-            self.skipWaiting();
-          });
-      })
-      .catch(err => {
-        console.log('No se registró el cache', err);
-      })
+      .then(cache => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting())
   );
 });
 
-// Evento de activación del Service Worker
+// =========================
+//  ACTIVATE (limpieza)
+// =========================
 self.addEventListener('activate', e => {
-  const cacheWhitelist = [CACHE_NAME];
-
   e.waitUntil(
     caches.keys()
-      .then(cacheNames => {
-        return Promise.all(
-          cacheNames.map(cacheName => {
-            if (cacheWhitelist.indexOf(cacheName) === -1) {
-              return caches.delete(cacheName);
-            }
-          })
-        );
-      })
+      .then(keys => Promise.all(
+        keys.map(key => key !== CACHE_NAME ? caches.delete(key) : null)
+      ))
       .then(() => self.clients.claim())
   );
 });
 
-// Evento fetch del Service Worker
+// =========================
+//  FETCH (offline support)
+// =========================
 self.addEventListener('fetch', e => {
+
+  // Ignorar chrome-extension:// y anything non-HTTP
+  if (!e.request.url.startsWith('http')) return;
+
   e.respondWith(
     caches.match(e.request)
-      .then(res => {
-        if (res) {
-          return res;
-        }
-        return fetch(e.request);
+      .then(cached => {
+        if (cached) return cached;
+
+        return fetch(e.request)
+          .catch(() => caches.match('./index.html')); 
       })
   );
 });
 
-// MEJORAS PARA NOTIFICACIONES PUSH:
+// =========================
+//  PUSH NOTIFICATIONS
+// =========================
 
-// Evento push del Service Worker
 self.addEventListener('push', e => {
   let data = {};
-  
+
   try {
     data = e.data ? e.data.json() : {};
   } catch (error) {
-    console.log('Error parsing push data:', error);
     data = {
       title: 'Notificación',
       body: 'Tienes una nueva notificación',
-      icon: './assets/image/icon.png'
+      icon: './assets/images/store.png'
     };
   }
 
   const title = data.title || 'Notificación';
   const options = {
     body: data.body || 'Tienes una nueva notificación',
-    icon: data.icon || './assets/image/icon.png',
-    badge: data.badge || './assets/image/icon.png',
+    icon: data.icon || './assets/images/store.png',
+    badge: data.badge || './assets/images/store.png',
     image: data.image,
     vibrate: [200, 100, 200],
     data: data.data || { url: data.url || './' },
     actions: data.actions || [
-      {
-        action: 'view',
-        title: 'Ver'
-      },
-      {
-        action: 'close',
-        title: 'Cerrar'
-      }
+      { action: 'view', title: 'Ver' },
+      { action: 'close', title: 'Cerrar' }
     ]
   };
 
@@ -103,39 +92,27 @@ self.addEventListener('push', e => {
   );
 });
 
-// Manejar clics en notificaciones
+// Click en notificaciones
 self.addEventListener('notificationclick', e => {
   e.notification.close();
 
-  const notificationData = e.notification.data;
-  const action = e.action;
-
-  if (action === 'close') {
-    return;
-  }
-
-  // Por defecto, abrir la aplicación
-  let urlToOpen = notificationData.url || './';
+  const urlToOpen = e.notification.data.url || './';
 
   e.waitUntil(
-    clients.matchAll({ type: 'window' })
-      .then(clientList => {
-        // Buscar si ya hay una ventana abierta
-        for (const client of clientList) {
-          if (client.url.includes(self.location.origin) && 'focus' in client) {
-            return client.focus();
-          }
+    clients.matchAll({ type: 'window' }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          return client.focus();
         }
-        
-        // Si no hay ventana abierta, abrir una nueva
-        if (clients.openWindow) {
-          return clients.openWindow(urlToOpen);
-        }
-      })
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
   );
 });
 
-// Manejar cierre de notificaciones
+// Cierre de notificación
 self.addEventListener('notificationclose', e => {
   console.log('Notificación cerrada:', e.notification);
 });
